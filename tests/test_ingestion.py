@@ -2,11 +2,15 @@ import h5py
 import numpy as np
 import pytest
 
+import rasterio
+from rasterio.transform import from_origin
+
 from src.data.ingestion import (
     inspect_hdf5,
     load_hdf5_cube,
     get_cube_summary,
-    validate_file
+    validate_file,
+    load_geotiff_cube
 )
 
 
@@ -69,3 +73,46 @@ def test_cube_summary():
 def test_missing_file():
     with pytest.raises(FileNotFoundError):
         validate_file("missing.h5")
+
+
+
+def test_load_geotiff_cube(tmp_path):
+    file_path = tmp_path / "sample.tif"
+    expected_cube = np.random.default_rng(42).random(
+        (3, 20, 30)
+    ).astype("float32")
+
+    with rasterio.open(
+        file_path,
+        "w",
+        driver="GTiff",
+        height=20,
+        width=30,
+        count=3,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=from_origin(75.0, 32.0, 0.0001, 0.0001)
+    ) as dataset:
+        dataset.write(expected_cube)
+
+    actual_cube, metadata = load_geotiff_cube(file_path)
+
+    assert actual_cube.shape == (20, 30, 3)
+    assert metadata["height"] == 20
+    assert metadata["width"] == 30
+    assert metadata["bands"] == 3
+    assert metadata["crs"] == "EPSG:4326"
+    assert metadata["cube_layout"] == "height_width_bands"
+
+    np.testing.assert_array_equal(
+        actual_cube,
+        np.moveaxis(expected_cube, 0, -1)
+    )
+
+
+def test_load_geotiff_rejects_hdf5(tmp_path):
+    file_path = tmp_path / "sample.h5"
+    file_path.touch()
+
+    with pytest.raises(ValueError, match="Expected a GeoTIFF"):
+        load_geotiff_cube(file_path)

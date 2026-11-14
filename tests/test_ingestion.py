@@ -116,3 +116,58 @@ def test_load_geotiff_rejects_hdf5(tmp_path):
 
     with pytest.raises(ValueError, match="Expected a GeoTIFF"):
         load_geotiff_cube(file_path)
+
+
+def test_load_geotiff_handles_nodata_pixels(tmp_path):
+    file_path = tmp_path / "nodata_sample.tif"
+
+    cube = np.ones((3, 10, 10), dtype=np.float32)
+    cube[:, 2, 3] = -9999.0
+
+    with rasterio.open(
+        file_path,
+        "w",
+        driver="GTiff",
+        height=10,
+        width=10,
+        count=3,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=from_origin(75.0, 32.0, 0.0001, 0.0001),
+        nodata=-9999.0
+    ) as dataset:
+        dataset.write(cube)
+
+    actual_cube, metadata = load_geotiff_cube(file_path)
+
+    assert metadata["nodata"] == -9999.0
+    assert actual_cube.shape == (10, 10, 3)
+    assert np.isnan(actual_cube[2, 3]).all()
+    assert metadata["valid_mask"][2, 3] == False
+    assert metadata["valid_mask"][0, 0] == True
+
+
+def test_load_geotiff_valid_mask_shape(tmp_path):
+    file_path = tmp_path / "valid_mask_sample.tif"
+
+    cube = np.ones((3, 8, 12), dtype=np.float32)
+
+    with rasterio.open(
+        file_path,
+        "w",
+        driver="GTiff",
+        height=8,
+        width=12,
+        count=3,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=from_origin(75.0, 32.0, 0.0001, 0.0001),
+        nodata=-9999.0
+    ) as dataset:
+        dataset.write(cube)
+
+    actual_cube, metadata = load_geotiff_cube(file_path)
+
+    assert metadata["valid_mask"].shape == (8, 12)
+    assert metadata["valid_mask"].all()
+    assert np.isfinite(actual_cube).all()

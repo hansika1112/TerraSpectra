@@ -81,8 +81,14 @@ def load_geotiff_cube(file_path):
         ) from error
 
     with rasterio.open(path) as dataset:
-        band_first_cube = dataset.read()
-        cube = np.moveaxis(band_first_cube, 0, -1)
+        band_first_cube = dataset.read(masked=True)
+        valid_mask = np.all(~np.ma.getmaskarray(band_first_cube), axis=0)
+
+        cube = np.moveaxis(
+            band_first_cube.filled(np.nan),
+            0,
+            -1
+        )
 
         metadata = {
             "width": dataset.width,
@@ -91,7 +97,9 @@ def load_geotiff_cube(file_path):
             "crs": str(dataset.crs),
             "dtype": dataset.dtypes,
             "transform": tuple(dataset.transform),
-            "cube_layout": "height_width_bands"
+            "cube_layout": "height_width_bands",
+            "nodata": dataset.nodata,
+            "valid_mask": valid_mask
         }
 
     return cube, metadata

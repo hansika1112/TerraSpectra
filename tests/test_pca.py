@@ -61,3 +61,80 @@ def test_pca_handles_missing_values():
 
     assert np.isfinite(reduced).all()
     assert reduced.shape == (10, 10, 3)
+
+
+def test_mask_aware_pca_excludes_invalid_pixels():
+    cube = np.random.default_rng(42).random(
+        (4, 4, 3)
+    ).astype(np.float32)
+
+    valid_mask = np.ones((4, 4), dtype=bool)
+    valid_mask[0, 0] = False
+    cube[0, 0] = 1000000.0
+
+    valid_pixels = cube[valid_mask].copy()
+
+    reduced, model = apply_pca(
+        cube,
+        n_components=2,
+        valid_mask=valid_mask
+    )
+
+    np.testing.assert_allclose(
+        model.mean_,
+        valid_pixels.mean(axis=0),
+        rtol=1e-5
+    )
+    assert reduced.shape == (4, 4, 2)
+
+
+def test_mask_aware_pca_preserves_invalid_pixels():
+    cube = np.random.default_rng(42).random(
+        (5, 5, 4)
+    ).astype(np.float32)
+
+    valid_mask = np.ones((5, 5), dtype=bool)
+    valid_mask[0, 0] = False
+    valid_mask[2, 3] = False
+
+    reduced, _ = apply_pca(
+        cube,
+        n_components=2,
+        valid_mask=valid_mask
+    )
+
+    assert np.isnan(reduced[0, 0]).all()
+    assert np.isnan(reduced[2, 3]).all()
+    assert np.isfinite(reduced[valid_mask]).all()
+
+
+def test_mask_aware_pca_rejects_wrong_mask_shape():
+    cube = np.ones((5, 5, 3), dtype=np.float32)
+    valid_mask = np.ones((4, 5), dtype=bool)
+
+    with pytest.raises(ValueError, match="Valid mask shape"):
+        apply_pca(cube, valid_mask=valid_mask)
+
+
+def test_mask_aware_pca_rejects_no_valid_pixels():
+    cube = np.ones((5, 5, 3), dtype=np.float32)
+    valid_mask = np.zeros((5, 5), dtype=bool)
+
+    with pytest.raises(ValueError, match="No valid pixels"):
+        apply_pca(cube, valid_mask=valid_mask)
+
+
+def test_mask_aware_pca_rejects_insufficient_valid_samples():
+    cube = np.random.default_rng(42).random(
+        (3, 3, 3)
+    ).astype(np.float32)
+
+    valid_mask = np.zeros((3, 3), dtype=bool)
+    valid_mask[0, 0] = True
+
+    with pytest.raises(ValueError, match="Invalid number"):
+        apply_pca(
+            cube,
+            n_components=2,
+            valid_mask=valid_mask
+        )

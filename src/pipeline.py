@@ -3,6 +3,10 @@ import numpy as np
 from src.data.ingestion import load_geotiff_cube
 from src.preprocessing.normalization import normalize_cube
 from src.dimensionality_reduction.pca import apply_pca
+from src.features.spectral_features import (
+    extract_spectral_features,
+    summarize_spectral_features
+)
 
 
 def preprocess_hyperspectral_cube(
@@ -41,15 +45,27 @@ def preprocess_hyperspectral_cube(
         valid_mask=valid_mask
     )
 
+    feature_result = extract_spectral_features(
+        normalized_cube,
+        valid_mask=valid_mask
+    )
+
+    feature_summary = summarize_spectral_features(feature_result)
+
     return {
         "normalized_cube": normalized_cube,
         "reduced_cube": reduced_cube,
         "pca_model": pca_model,
-        "valid_mask": valid_mask,
+        "valid_mask": feature_result["valid_mask"],
         "original_shape": cube.shape,
         "reduced_shape": reduced_cube.shape,
         "explained_variance_ratio": pca_model.explained_variance_ratio_,
-        "explained_variance": pca_model.explained_variance_ratio_.sum()
+        "explained_variance": pca_model.explained_variance_ratio_.sum(),
+        "spectral_features": feature_result["features"],
+        "feature_names": feature_result["feature_names"],
+        "feature_summary": feature_summary,
+        "feature_count": feature_result["feature_count"],
+        "valid_pixel_count": feature_result["valid_pixel_count"]
     }
 
 

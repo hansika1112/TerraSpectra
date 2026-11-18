@@ -82,3 +82,42 @@ def test_preprocess_geotiff_end_to_end():
     assert results["valid_mask"].shape == (100, 100)
     assert np.isfinite(results["reduced_cube"]).all()
     assert results["explained_variance"] > 0
+
+
+def test_pipeline_returns_spectral_features():
+    cube = np.random.default_rng(42).random(
+        (10, 10, 4)
+    ).astype(np.float32)
+
+    results = preprocess_hyperspectral_cube(
+        cube,
+        n_components=2
+    )
+
+    assert results["spectral_features"].shape == (100, 6)
+    assert len(results["feature_names"]) == 6
+    assert results["feature_count"] == 6
+    assert results["valid_pixel_count"] == 100
+    assert len(results["feature_summary"]) == 6
+    assert np.isfinite(results["spectral_features"]).all()
+
+
+def test_pipeline_features_exclude_invalid_pixels():
+    cube = np.random.default_rng(42).random(
+        (10, 10, 4)
+    ).astype(np.float32)
+
+    valid_mask = np.ones((10, 10), dtype=bool)
+    valid_mask[0, 0] = False
+    valid_mask[2, 3] = False
+
+    results = preprocess_hyperspectral_cube(
+        cube,
+        valid_mask=valid_mask,
+        n_components=2
+    )
+
+    assert results["valid_pixel_count"] == 98
+    assert results["spectral_features"].shape == (98, 6)
+    assert np.isnan(results["normalized_cube"][0, 0]).all()
+    assert np.isnan(results["reduced_cube"][2, 3]).all()

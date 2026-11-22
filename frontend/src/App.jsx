@@ -1,9 +1,10 @@
+import DatasetUpload from './components/DatasetUpload.jsx'
 import { useState } from 'react'
 import {
-  Activity, BarChart3, Database, LayoutDashboard, Upload,
+  Activity, BarChart3, Database, LayoutDashboard,
   Layers3, ScanSearch, Settings, Bell, Search, ChevronDown,
   ArrowUpRight, ArrowDownRight, Cpu, FileImage, CheckCircle2,
-  Clock3, Zap, Menu, X, MoreHorizontal, Download
+  Clock3, Zap, Menu, X, MoreHorizontal
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -143,6 +144,8 @@ function Dashboard({ active }) {
         <button className="date-button"><Clock3 size={15}/> November 21, 2026</button>
       </div>
 
+      <DatasetUpload />
+
       <div className="metrics-grid">
         <MetricCard icon={FileImage} title="Total Datasets" value="12" change="+2.5%" description="vs last month" color="cyan"/>
         <MetricCard icon={CheckCircle2} title="Processed Images" value="08" change="+12.8%" description="vs last month" color="green"/>
@@ -186,7 +189,7 @@ function Dashboard({ active }) {
               ['PCA Reduction','Dimensionality reduction','done'],
               ['Feature Extraction','Spectral feature generation','done'],
               ['ML Classification','Ground-truth labels required','pending'],
-            ].map(([title,sub,status],i)=>(
+            ].map(([title,sub,status])=>(
               <div className="pipeline-step" key={title}>
                 <div className={`step-icon ${status}`}><span>{status === 'done' ? <CheckCircle2 size={17}/> : <Clock3 size={17}/>}</span></div>
                 <div className="step-copy"><strong>{title}</strong><small>{sub}</small></div>

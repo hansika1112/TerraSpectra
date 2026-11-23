@@ -1,7 +1,17 @@
 import { useRef, useState } from 'react'
-import { Upload, FileImage, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import {
+  Upload,
+  FileImage,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  LoaderCircle,
+  Database,
+} from 'lucide-react'
 
+const API_URL = 'http://127.0.0.1:8000/api/process'
 const supportedFormats = ['.tif', '.tiff', '.h5', '.hdf5']
+const MAX_FILE_SIZE = 100 * 1024 * 1024
 
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`
@@ -11,9 +21,14 @@ function formatSize(bytes) {
 
 export default function DatasetUpload() {
   const inputRef = useRef(null)
+
   const [file, setFile] = useState(null)
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [processing, setProcessing] = useState(false)
+  const [datasets, setDatasets] = useState([])
+  const [datasetKey, setDatasetKey] = useState('')
+  const [result, setResult] = useState(null)
 
   function handleFile(selectedFile) {
     if (!selectedFile) return
@@ -23,13 +38,20 @@ export default function DatasetUpload() {
       .toLowerCase()
 
     if (!supportedFormats.includes(extension)) {
-      setFile(null)
       setError('Unsupported format. Please select a TIFF or HDF5 file.')
       return
     }
 
-    setError('')
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      setError('File exceeds the 100 MB upload limit.')
+      return
+    }
+
     setFile(selectedFile)
+    setError('')
+    setDatasets([])
+    setDatasetKey('')
+    setResult(null)
   }
 
   function handleDrop(event) {
@@ -41,7 +63,62 @@ export default function DatasetUpload() {
   function clearFile() {
     setFile(null)
     setError('')
-    if (inputRef.current) inputRef.current.value = ''
+    setDatasets([])
+    setDatasetKey('')
+    setResult(null)
+
+    if (inputRef.current) {
+      inputRef.current.value = ''
+    }
+  }
+
+  async function processDataset(selectedKey = '') {
+    if (!file || processing) return
+
+    setProcessing(true)
+    setError('')
+    setResult(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      if (selectedKey) {
+        formData.append('dataset_key', selectedKey)
+      }
+
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Dataset processing failed.')
+      }
+
+      if (data.status === 'dataset_selection_required') {
+        setDatasets(data.datasets || [])
+        setDatasetKey(data.datasets?.[0]?.name || '')
+        return
+      }
+
+      if (data.status === 'success') {
+        setResult(data)
+        setDatasets([])
+      } else {
+        throw new Error('Unexpected response from the processing server.')
+      }
+    } catch (err) {
+      setError(
+        err.message.includes('Failed to fetch')
+          ? 'Cannot connect to TerraSpectra API. Make sure the backend server is running.'
+          : err.message
+      )
+    } finally {
+      setProcessing(false)
+    }
   }
 
   return (
@@ -82,12 +159,13 @@ export default function DatasetUpload() {
           className="upload-browse-button"
           onClick={() => inputRef.current?.click()}
           type="button"
+          disabled={processing}
         >
           <Upload size={15} /> Browse Files
         </button>
 
         <span className="upload-hint">
-          Supported formats: .TIF, .TIFF, .H5, .HDF5
+          Supported formats: .TIF, .TIFF, .H5, .HDF5 · Maximum 100 MB
         </span>
       </div>
 
@@ -106,7 +184,9 @@ export default function DatasetUpload() {
 
           <div className="selected-file-info">
             <strong>{file.name}</strong>
-            <span>{formatSize(file.size)} · {file.name.split('.').pop().toUpperCase()}</span>
+            <span>
+              {formatSize(file.size)} · {file.name.split('.').pop().toUpperCase()}
+            </span>
           </div>
 
           <div className="selected-file-status">
@@ -119,15 +199,125 @@ export default function DatasetUpload() {
             onClick={clearFile}
             type="button"
             aria-label="Remove selected file"
+            disabled={processing}
           >
             <X size={17} />
           </button>
         </div>
       )}
 
+      {file && (
+        <button
+          className="upload-browse-button"
+          type="button"
+          onClick={() => processDataset()}
+          disabled={processing}
+        >
+          {processing ? (
+            <>
+              <LoaderCircle size={16} className="upload-spinner" />
+              Uploading and Processing...
+            </>
+          ) : (
+            <>
+              <Database size={16} />
+              Process Dataset
+            </>
+          )}
+        </button>
+      )}
+
+      {datasets.length > 0 && (
+        <div className="dataset-selection">
+          <h4>Choose HDF5 Dataset</h4>
+          <p>Multiple datasets were found. Select the hyperspectral cube to process.</p>
+
+          <select
+            value={datasetKey}
+            onChange={(event) => setDatasetKey(event.target.value)}
+            disabled={processing}
+          >
+            {datasets.map((dataset) => (
+              <option key={dataset.name} value={dataset.name}>
+                {dataset.name} — {dataset.shape.join(' × ')} ({dataset.dtype})
+              </option>
+            ))}
+          </select>
+
+          <button
+            className="upload-browse-button"
+            type="button"
+            onClick={() => processDataset(datasetKey)}
+            disabled={processing || !datasetKey}
+          >
+            {processing ? 'Processing...' : 'Process Selected Dataset'}
+          </button>
+        </div>
+      )}
+
+      {result && (
+        <div className="processing-results">
+          <div className="processing-success">
+            <CheckCircle2 size={19} />
+            <strong>Dataset processed successfully</strong>
+          </div>
+
+          <h4>Processing Summary</h4>
+
+          <div className="processing-result-grid">
+            <div>
+              <span>Original Cube</span>
+              <strong>{result.original_cube.shape.join(' × ')}</strong>
+            </div>
+
+            <div>
+              <span>Reduced Cube</span>
+              <strong>{result.reduced_shape.join(' × ')}</strong>
+            </div>
+
+            <div>
+              <span>PCA Components</span>
+              <strong>{result.pca_components}</strong>
+            </div>
+
+            <div>
+              <span>Explained Variance</span>
+              <strong>
+                {(result.explained_variance * 100).toFixed(2)}%
+              </strong>
+            </div>
+
+            <div>
+              <span>Valid Pixels</span>
+              <strong>{result.valid_pixel_count}</strong>
+            </div>
+
+            <div>
+              <span>Spectral Features</span>
+              <strong>{result.feature_count}</strong>
+            </div>
+          </div>
+
+          <h4>Spectral Feature Analysis</h4>
+
+          <div className="feature-summary">
+            {Object.entries(result.feature_summary).map(([name, values]) => (
+              <div className="feature-summary-item" key={name}>
+                <strong>{name.replaceAll('_', ' ')}</strong>
+                <span>
+                  Mean: {values.mean.toFixed(4)} · Min: {values.min.toFixed(4)} · Max: {values.max.toFixed(4)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="upload-footer">
-        <span> <CheckCircle2 size={14} /> Local file validation enabled</span>
-        <span>Backend integration pending</span>
+        <span>
+          <CheckCircle2 size={14} /> Backend processing enabled
+        </span>
+        <span>FastAPI · PCA · Spectral Analysis</span>
       </div>
     </section>
   )

@@ -10,3 +10,4 @@ uvicorn
 pytest
 
 rasterio
+python-multipart

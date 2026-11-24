@@ -298,6 +298,24 @@ export default function DatasetUpload() {
             </div>
           </div>
 
+          <div className="variance-visualization">
+            <div className="variance-heading">
+              <span>PCA Information Retained</span>
+              <strong>{(result.explained_variance * 100).toFixed(2)}%</strong>
+            </div>
+            <div className="variance-track">
+              <div
+                className="variance-fill"
+                style={{
+                  width: `${Math.min(Math.max(result.explained_variance * 100, 0), 100)}%`,
+                }}
+              />
+            </div>
+            <span className="variance-caption">
+              Explained variance captured by the reduced spectral representation
+            </span>
+          </div>
+
           <h4>Spectral Feature Analysis</h4>
 
           <div className="feature-summary">

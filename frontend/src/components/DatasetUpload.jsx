@@ -316,6 +316,37 @@ export default function DatasetUpload() {
             </span>
           </div>
 
+          <div className="pca-component-analysis">
+            <div className="pca-component-header">
+              <h4>Component-wise Variance</h4>
+              <span>
+                Cumulative: {(result.cumulative_variance_ratio?.at(-1) * 100 || 0).toFixed(2)}%
+              </span>
+            </div>
+
+            <div className="pca-component-chart">
+              {result.explained_variance_ratio?.map((variance, index) => (
+                <div className="pca-component-row" key={index}>
+                  <div className="pca-component-label">
+                    <strong>PC{index + 1}</strong>
+                    <span>{(variance * 100).toFixed(2)}%</span>
+                  </div>
+
+                  <div className="pca-component-track">
+                    <div
+                      className="pca-component-fill"
+                      style={{ width: `${Math.min(variance * 100, 100)}%` }}
+                    />
+                  </div>
+
+                  <div className="pca-cumulative-label">
+                    Cumulative: {(result.cumulative_variance_ratio?.[index] * 100 || 0).toFixed(2)}%
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <h4>Spectral Feature Analysis</h4>
 
           <div className="feature-summary">

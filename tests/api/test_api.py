@@ -2,6 +2,7 @@ import io
 
 import h5py
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
@@ -81,3 +82,15 @@ def test_process_hdf5_dataset():
     assert result["feature_count"] == 6
     assert result["pca_components"] >= 1
     assert result["valid_pixel_count"] == 100
+    assert len(result["explained_variance_ratio"]) == result["pca_components"]
+    assert len(result["cumulative_variance_ratio"]) == result["pca_components"]
+    assert result["cumulative_variance_ratio"][-1] == pytest.approx(
+        result["explained_variance"], abs=1e-6
+    )
+    assert all(
+        current >= previous
+        for previous, current in zip(
+            result["cumulative_variance_ratio"],
+            result["cumulative_variance_ratio"][1:]
+        )
+    )

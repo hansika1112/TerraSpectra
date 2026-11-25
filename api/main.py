@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import numpy as np
 import tempfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -139,6 +141,10 @@ async def process_dataset(
             "explained_variance_ratio": [
                 float(value)
                 for value in results["explained_variance_ratio"]
+            ],
+            "cumulative_variance_ratio": [
+                float(value)
+                for value in np.cumsum(results["explained_variance_ratio"])
             ],
             "feature_names": results["feature_names"],
             "feature_count": results["feature_count"],

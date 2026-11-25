@@ -7,9 +7,11 @@ import {
   AlertCircle,
   LoaderCircle,
   Database,
+  Download,
 } from 'lucide-react'
 
 const API_URL = 'http://127.0.0.1:8000/api/process'
+const EXPORT_API_URL = 'http://127.0.0.1:8000/api/export/features'
 const supportedFormats = ['.tif', '.tiff', '.h5', '.hdf5']
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 
@@ -26,6 +28,7 @@ export default function DatasetUpload() {
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [datasets, setDatasets] = useState([])
   const [datasetKey, setDatasetKey] = useState('')
   const [result, setResult] = useState(null)
@@ -119,6 +122,85 @@ export default function DatasetUpload() {
     } finally {
       setProcessing(false)
     }
+  }
+
+
+  function downloadBlob(blob, filename) {
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  }
+
+  async function downloadFeatureCsv() {
+    if (!file || !result || exporting) return
+
+    setExporting(true)
+    setError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      if (datasetKey) {
+        formData.append('dataset_key', datasetKey)
+      }
+
+      const response = await fetch(EXPORT_API_URL, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.detail || 'Feature CSV export failed.')
+      }
+
+      const blob = await response.blob()
+      downloadBlob(blob, 'terraspectra_features.csv')
+    } catch (err) {
+      setError(
+        err.message.includes('Failed to fetch')
+          ? 'Cannot connect to TerraSpectra API. Make sure the backend server is running.'
+          : err.message
+      )
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  function downloadPcaReport() {
+    if (!result) return
+
+    const report = {
+      project: 'TerraSpectra',
+      report_type: 'PCA Analysis Report',
+      generated_at: new Date().toISOString(),
+      filename: result.filename,
+      dataset_key: result.dataset_key,
+      original_cube: result.original_cube,
+      reduced_shape: result.reduced_shape,
+      pca_components: result.pca_components,
+      explained_variance: result.explained_variance,
+      explained_variance_ratio: result.explained_variance_ratio,
+      cumulative_variance_ratio: result.cumulative_variance_ratio,
+      feature_names: result.feature_names,
+      feature_count: result.feature_count,
+      valid_pixel_count: result.valid_pixel_count,
+      feature_summary: result.feature_summary,
+      metadata: result.metadata || null,
+    }
+
+    const blob = new Blob(
+      [JSON.stringify(report, null, 2)],
+      { type: 'application/json' }
+    )
+
+    downloadBlob(blob, 'terraspectra_pca_report.json')
   }
 
   return (
@@ -358,6 +440,36 @@ export default function DatasetUpload() {
                 </span>
               </div>
             ))}
+          </div>
+
+          <div className="dataset-download-actions">
+            <button
+              className="upload-browse-button"
+              type="button"
+              onClick={downloadFeatureCsv}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <>
+                  <LoaderCircle size={16} className="upload-spinner" />
+                  Exporting CSV...
+                </>
+              ) : (
+                <>
+                  <Download size={16} />
+                  Download Feature CSV
+                </>
+              )}
+            </button>
+
+            <button
+              className="upload-browse-button"
+              type="button"
+              onClick={downloadPcaReport}
+            >
+              <Download size={16} />
+              Download PCA Report
+            </button>
           </div>
         </div>
       )}

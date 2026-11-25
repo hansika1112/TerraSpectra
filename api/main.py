@@ -5,6 +5,8 @@ import tempfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from src.data.ingestion import (
     inspect_hdf5,
@@ -13,6 +15,7 @@ from src.data.ingestion import (
     get_cube_summary,
 )
 from src.pipeline import preprocess_hyperspectral_cube
+from src.features.dataset import export_feature_dataset
 
 app = FastAPI(
     title="TerraSpectra API",
@@ -174,6 +177,130 @@ async def process_dataset(
         raise HTTPException(
             status_code=500,
             detail=f"Processing failed: {str(error)}",
+        ) from error
+
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+        await file.close()
+
+
+@app.post("/api/export/features")
+async def export_features(
+    file: UploadFile = File(...),
+    dataset_key: str = Form(default=""),
+):
+    extension = Path(file.filename or "").suffix.lower()
+
+    if extension not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file format. Upload TIFF or HDF5.",
+        )
+
+    temp_path = None
+    output_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=extension,
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            size = 0
+
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+
+                if size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="File exceeds the 100 MB upload limit.",
+                    )
+
+                temp_file.write(chunk)
+
+        if size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty.",
+            )
+
+        if extension in {".h5", ".hdf5"}:
+            datasets = inspect_hdf5(temp_path)
+
+            if not datasets:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No datasets found in the HDF5 file.",
+                )
+
+            if not dataset_key:
+                return {
+                    "status": "dataset_selection_required",
+                    "datasets": [
+                        {
+                            "name": item["name"],
+                            "shape": list(item["shape"]),
+                            "dtype": item["dtype"],
+                        }
+                        for item in datasets
+                    ],
+                }
+
+            cube = load_hdf5_cube(temp_path, dataset_key)
+            valid_mask = None
+
+        else:
+            cube, metadata = load_geotiff_cube(temp_path)
+            valid_mask = metadata["valid_mask"]
+
+        results = preprocess_hyperspectral_cube(
+            cube,
+            valid_mask=valid_mask,
+        )
+
+        feature_result = {
+            "spectral_features": results["spectral_features"],
+            "feature_names": results["feature_names"],
+            "valid_mask": results["valid_mask"],
+        }
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".csv",
+            delete=False,
+        ) as output_file:
+            output_path = Path(output_file.name)
+
+        export_feature_dataset(feature_result, output_path)
+
+        return FileResponse(
+            path=output_path,
+            media_type="text/csv",
+            filename="terraspectra_features.csv",
+            background=BackgroundTask(
+                output_path.unlink,
+                missing_ok=True,
+            ),
+        )
+
+    except HTTPException:
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
+        raise
+
+    except (ValueError, TypeError, KeyError, FileNotFoundError) as error:
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    except Exception as error:
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Feature export failed: {str(error)}",
         ) from error
 
     finally:

@@ -94,3 +94,50 @@ def test_process_hdf5_dataset():
             result["cumulative_variance_ratio"][1:]
         )
     )
+
+
+def test_export_hdf5_features_csv():
+    response = client.post(
+        "/api/export/features",
+        files={
+            "file": (
+                "sample.h5",
+                create_hdf5_file(),
+                "application/octet-stream",
+            )
+        },
+        data={"dataset_key": "cube"},
+    )
+
+    assert response.status_code == 200
+    assert "text/csv" in response.headers["content-type"]
+    assert "terraspectra_features.csv" in response.headers[
+        "content-disposition"
+    ]
+
+    import csv
+
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+
+    assert len(rows) == 100
+    assert {"row", "column"}.issubset(rows[0].keys())
+    assert len(rows[0]) == 8
+    assert all(
+        row["row"] != "" and row["column"] != ""
+        for row in rows
+    )
+
+
+def test_export_rejects_unsupported_file():
+    response = client.post(
+        "/api/export/features",
+        files={
+            "file": (
+                "data.txt",
+                b"invalid data",
+                "text/plain",
+            )
+        },
+    )
+
+    assert response.status_code == 400

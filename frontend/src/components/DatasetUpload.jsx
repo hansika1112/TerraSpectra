@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Upload,
   FileImage,
@@ -8,10 +8,13 @@ import {
   LoaderCircle,
   Database,
   Download,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 
 const API_URL = 'http://127.0.0.1:8000/api/process'
 const EXPORT_API_URL = 'http://127.0.0.1:8000/api/export/features'
+const BAND_API_URL = 'http://127.0.0.1:8000/api/preview/band'
 const supportedFormats = ['.tif', '.tiff', '.h5', '.hdf5']
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 
@@ -32,6 +35,43 @@ export default function DatasetUpload() {
   const [datasets, setDatasets] = useState([])
   const [datasetKey, setDatasetKey] = useState('')
   const [result, setResult] = useState(null)
+  const [bandIndex, setBandIndex] = useState(0)
+  const [bandPreview, setBandPreview] = useState(null)
+  const [bandLoading, setBandLoading] = useState(false)
+  const [bandError, setBandError] = useState('')
+  const bandCanvasRef = useRef(null)
+  const bandRequestRef = useRef(0)
+
+  useEffect(() => {
+    if (!bandPreview?.preview_data?.length || !bandCanvasRef.current) {
+      return
+    }
+
+    const pixels = bandPreview.preview_data
+    const height = pixels.length
+    const width = pixels[0].length
+    const canvas = bandCanvasRef.current
+    const context = canvas.getContext('2d')
+
+    canvas.width = width
+    canvas.height = height
+
+    const imageData = context.createImageData(width, height)
+
+    for (let row = 0; row < height; row += 1) {
+      for (let column = 0; column < width; column += 1) {
+        const offset = (row * width + column) * 4
+        const value = pixels[row][column]
+
+        imageData.data[offset] = value
+        imageData.data[offset + 1] = value
+        imageData.data[offset + 2] = value
+        imageData.data[offset + 3] = 255
+      }
+    }
+
+    context.putImageData(imageData, 0, 0)
+  }, [bandPreview])
 
   function handleFile(selectedFile) {
     if (!selectedFile) return
@@ -55,6 +95,10 @@ export default function DatasetUpload() {
     setDatasets([])
     setDatasetKey('')
     setResult(null)
+    setBandPreview(null)
+    setBandIndex(0)
+    setBandError('')
+    bandRequestRef.current += 1
   }
 
   function handleDrop(event) {
@@ -69,9 +113,59 @@ export default function DatasetUpload() {
     setDatasets([])
     setDatasetKey('')
     setResult(null)
+    setBandPreview(null)
+    setBandIndex(0)
+    setBandError('')
+    bandRequestRef.current += 1
 
     if (inputRef.current) {
       inputRef.current.value = ''
+    }
+  }
+
+  async function fetchBandPreview(index, selectedKey = datasetKey) {
+    if (!file) return
+
+    const requestId = ++bandRequestRef.current
+    setBandLoading(true)
+    setBandError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('band_index', String(index))
+
+      if (selectedKey) {
+        formData.append('dataset_key', selectedKey)
+      }
+
+      const response = await fetch(BAND_API_URL, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Band preview failed.')
+      }
+
+      if (requestId === bandRequestRef.current) {
+        setBandPreview(data)
+      }
+    } catch (err) {
+      if (requestId === bandRequestRef.current) {
+        setBandError(
+          err.message.includes('Failed to fetch')
+            ? 'Cannot connect to TerraSpectra API.'
+            : err.message
+        )
+        setBandPreview(null)
+      }
+    } finally {
+      if (requestId === bandRequestRef.current) {
+        setBandLoading(false)
+      }
     }
   }
 
@@ -81,6 +175,8 @@ export default function DatasetUpload() {
     setProcessing(true)
     setError('')
     setResult(null)
+    setBandPreview(null)
+    setBandError('')
 
     try {
       const formData = new FormData()
@@ -110,6 +206,8 @@ export default function DatasetUpload() {
       if (data.status === 'success') {
         setResult(data)
         setDatasets([])
+        setBandIndex(0)
+        await fetchBandPreview(0, selectedKey || datasetKey)
       } else {
         throw new Error('Unexpected response from the processing server.')
       }
@@ -379,6 +477,134 @@ export default function DatasetUpload() {
               <strong>{result.feature_count}</strong>
             </div>
           </div>
+
+          {bandPreview && (
+            <div className="band-explorer">
+              <div className="band-explorer-header">
+                <div>
+                  <h4>Interactive Spectral Band Explorer</h4>
+                  <p>Explore individual wavelengths across your hyperspectral cube</p>
+                </div>
+                <span>
+                  Band {bandPreview.band_index + 1} / {bandPreview.band_count}
+                </span>
+              </div>
+
+              <div className="band-preview-layout">
+                <div className="band-image-frame">
+                  <canvas
+                    ref={bandCanvasRef}
+                    aria-label={`Grayscale preview of spectral band ${bandIndex + 1}`}
+                  />
+                </div>
+
+                <div className="band-stat-grid">
+                  <div>
+                    <span>Minimum</span>
+                    <strong>{bandPreview.statistics.min?.toFixed(4) ?? 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span>Maximum</span>
+                    <strong>{bandPreview.statistics.max?.toFixed(4) ?? 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span>Mean</span>
+                    <strong>{bandPreview.statistics.mean?.toFixed(4) ?? 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span>Std. Deviation</span>
+                    <strong>{bandPreview.statistics.std?.toFixed(4) ?? 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span>Valid Pixels</span>
+                    <strong>{bandPreview.statistics.valid_pixels}</strong>
+                  </div>
+                  <div>
+                    <span>Missing Pixels</span>
+                    <strong>{bandPreview.statistics.missing_pixels}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="band-controls">
+                <button
+                  type="button"
+                  aria-label="Previous spectral band"
+                  onClick={() => {
+                    const next = Math.max(0, bandIndex - 1)
+                    setBandIndex(next)
+                    fetchBandPreview(next)
+                  }}
+                  disabled={bandLoading || bandIndex === 0}
+                >
+                  <ChevronLeft size={17} />
+                </button>
+
+                <div className="band-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max={bandPreview.band_count - 1}
+                    value={bandIndex}
+                    onChange={(event) => {
+                      const next = Number(event.target.value)
+                      setBandIndex(next)
+                      fetchBandPreview(next)
+                    }}
+                    aria-label="Select spectral band"
+                    disabled={bandLoading}
+                  />
+                  <div className="band-slider-labels">
+                    <span>Band 1</span>
+                    <span>Band {bandPreview.band_count}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  aria-label="Next spectral band"
+                  onClick={() => {
+                    const next = Math.min(
+                      bandPreview.band_count - 1,
+                      bandIndex + 1
+                    )
+                    setBandIndex(next)
+                    fetchBandPreview(next)
+                  }}
+                  disabled={bandLoading || bandIndex === bandPreview.band_count - 1}
+                >
+                  <ChevronRight size={17} />
+                </button>
+              </div>
+
+              {bandLoading && (
+                <p className="band-loading">
+                  <LoaderCircle size={15} className="upload-spinner" />
+                  Loading spectral band...
+                </p>
+              )}
+
+              {bandError && (
+                <p className="band-error">
+                  <AlertCircle size={15} />
+                  {bandError}
+                </p>
+              )}
+
+              <p className="band-preview-caption">
+                Preview: {bandPreview.preview_shape.join(' × ')} pixels
+                {' · '}
+                Original: {bandPreview.original_shape.join(' × ')} pixels
+              </p>
+            </div>
+          )}
+
+          {bandError && !bandPreview && (
+            <div className="upload-error">
+              <AlertCircle size={17} />
+              <span>{bandError}</span>
+            </div>
+          )}
 
           <div className="variance-visualization">
             <div className="variance-heading">

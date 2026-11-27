@@ -308,3 +308,133 @@ async def export_features(
             temp_path.unlink(missing_ok=True)
 
         await file.close()
+
+
+@app.post("/api/preview/band")
+async def preview_band(
+    file: UploadFile = File(...),
+    band_index: int = Form(...),
+    dataset_key: str = Form(default=""),
+):
+    extension = Path(file.filename or "").suffix.lower()
+
+    if extension not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file format. Upload TIFF or HDF5.",
+        )
+
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=extension,
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            size = 0
+
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+
+                if size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="File exceeds the 100 MB upload limit.",
+                    )
+
+                temp_file.write(chunk)
+
+        if size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty.",
+            )
+
+        if extension in {".h5", ".hdf5"}:
+            if not dataset_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Select an HDF5 dataset first.",
+                )
+
+            cube = load_hdf5_cube(temp_path, dataset_key)
+        else:
+            cube, _ = load_geotiff_cube(temp_path)
+
+        band_count = cube.shape[2]
+
+        if band_index < 0 or band_index >= band_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Band index must be between 0 and {band_count - 1}.",
+            )
+
+        band = np.asarray(cube[:, :, band_index], dtype=np.float64)
+        finite_mask = np.isfinite(band)
+        finite_values = band[finite_mask]
+
+        if finite_values.size:
+            band_min = float(finite_values.min())
+            band_max = float(finite_values.max())
+            band_mean = float(finite_values.mean())
+            band_std = float(finite_values.std())
+        else:
+            band_min = None
+            band_max = None
+            band_mean = None
+            band_std = None
+
+        height, width = band.shape
+        row_step = max(1, int(np.ceil(height / 256)))
+        column_step = max(1, int(np.ceil(width / 256)))
+
+        preview = band[::row_step, ::column_step]
+        preview_finite = np.isfinite(preview)
+
+        normalized_preview = np.zeros(preview.shape, dtype=np.uint8)
+
+        if finite_values.size and band_max > band_min:
+            normalized_preview[preview_finite] = (
+                (preview[preview_finite] - band_min)
+                / (band_max - band_min)
+                * 255
+            ).astype(np.uint8)
+        elif finite_values.size:
+            normalized_preview[preview_finite] = 127
+
+        return {
+            "status": "success",
+            "filename": file.filename,
+            "band_index": band_index,
+            "band_count": band_count,
+            "original_shape": [height, width],
+            "preview_shape": list(normalized_preview.shape),
+            "preview_data": normalized_preview.tolist(),
+            "statistics": {
+                "min": band_min,
+                "max": band_max,
+                "mean": band_mean,
+                "std": band_std,
+                "valid_pixels": int(finite_values.size),
+                "missing_pixels": int(band.size - finite_values.size),
+            },
+        }
+
+    except HTTPException:
+        raise
+
+    except (ValueError, TypeError, KeyError, FileNotFoundError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Band preview failed: {str(error)}",
+        ) from error
+
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+        await file.close()

@@ -141,3 +141,73 @@ def test_export_rejects_unsupported_file():
     )
 
     assert response.status_code == 400
+
+
+def test_preview_hdf5_band():
+    response = client.post(
+        "/api/preview/band",
+        files={
+            "file": (
+                "sample.h5",
+                create_hdf5_file(),
+                "application/octet-stream",
+            )
+        },
+        data={
+            "dataset_key": "cube",
+            "band_index": "2",
+        },
+    )
+
+    assert response.status_code == 200
+
+    result = response.json()
+
+    assert result["status"] == "success"
+    assert result["band_index"] == 2
+    assert result["band_count"] == 5
+    assert result["original_shape"] == [10, 10]
+    assert result["preview_shape"] == [10, 10]
+    assert len(result["preview_data"]) == 10
+    assert len(result["preview_data"][0]) == 10
+    assert result["statistics"]["valid_pixels"] == 100
+    assert result["statistics"]["missing_pixels"] == 0
+    assert result["statistics"]["min"] <= result["statistics"]["mean"]
+    assert result["statistics"]["mean"] <= result["statistics"]["max"]
+
+
+def test_preview_hdf5_invalid_band_index():
+    response = client.post(
+        "/api/preview/band",
+        files={
+            "file": (
+                "sample.h5",
+                create_hdf5_file(),
+                "application/octet-stream",
+            )
+        },
+        data={
+            "dataset_key": "cube",
+            "band_index": "5",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Band index must be between 0 and 4" in response.json()["detail"]
+
+
+def test_preview_hdf5_requires_dataset_selection():
+    response = client.post(
+        "/api/preview/band",
+        files={
+            "file": (
+                "sample.h5",
+                create_hdf5_file(),
+                "application/octet-stream",
+            )
+        },
+        data={"band_index": "0"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Select an HDF5 dataset first."
